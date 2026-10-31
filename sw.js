@@ -1,8 +1,8 @@
 // Service worker: membuat aplikasi tetap bisa dibuka tanpa internet,
 // dan menerima gambar dari menu "Bagikan" Android.
 // Naikkan angka versi setiap kali Anda meng-update file aplikasi.
-const CACHE = 'keuanganku-v8';
-const FILES = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'keuanganku-v9';
+const FILES = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './icons.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

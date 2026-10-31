@@ -127,7 +127,7 @@
   }
   function applyData(json) {
     data = { tx: json.tx || [], master: json.master || { jenis: [], categories: [] }, budgetHist: json.budgetHist || {}, missionHist: json.missionHist || {}, alokasi: json.alokasi || null,
-             loadedAt: new Date().toISOString(), sheetName: json.sheetName };
+             icons: json.icons || {}, loadedAt: new Date().toISOString(), sheetName: json.sheetName };
     store.set(K_DATA, data);
   }
   function setSync(text, err) {
@@ -176,8 +176,8 @@
   }
   $$('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
   document.addEventListener('click', e => { const g = e.target.closest('[data-goto]'); if (g) showView(g.dataset.goto); });
-  $('#prevPeriod').addEventListener('click', () => { const n = periods().length; if (periodIdx < 0) periodIdx = n - 1; if (periodIdx > 0) periodIdx--; selectedCat = null; render(); });
-  $('#nextPeriod').addEventListener('click', () => { const n = periods().length; if (periodIdx < n - 1) periodIdx++; selectedCat = null; render(); });
+  $('#prevPeriod').addEventListener('click', () => { const n = periods().length; if (periodIdx < 0) periodIdx = n - 1; if (periodIdx > 0) periodIdx--; render(); });
+  $('#nextPeriod').addEventListener('click', () => { const n = periods().length; if (periodIdx < n - 1) periodIdx++; render(); });
   $('#syncStatus').addEventListener('click', () => reload());
   $('#syncNow').addEventListener('click', async () => {
     try { await flushPending(); } catch (e) { toast(e.message, 4000); }
@@ -196,9 +196,45 @@
     $('#pendingText').textContent = `${pending.length} transaksi belum terkirim ke sheet.`;
     if (currentView === 'dashboard') renderDashboard(p, list);
     if (currentView === 'history') renderHistory(p);
-    if (currentView === 'budget') renderBudgetForm();
+    if (currentView === 'budget') { renderBudgetTable(); renderBudgetForm(); }
     if (currentView === 'settings') renderSettings();
   }
+
+  // ---------- ikon & warna kategori ----------
+  const ico = (name, cls = '') => `<svg class="ico ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+  const ICON_CHOICES = ['home','receipt','bolt','droplet','wifi','device-mobile','gift','heart-handshake','alert-triangle','first-aid-kit','pill',
+    'shopping-cart','basket','shirt','tools-kitchen-2','coffee','pizza','bread','beer','motorbike','car','bus','gas-station','plane',
+    'ball-tennis','barbell','device-gamepad-2','movie','music','sparkles','school','book','baby-carriage','paw','building-church','users','friends',
+    'cake','scissors','tools','package','truck','building-store','credit-card','building-bank','receipt-tax','briefcase','pig-money','cash','heart','tag','dots'];
+  const ICON_RULES = [
+    [/sewa|kos|kontrak|rumah/i, 'home'], [/tagihan|listrik|spl|iuran/i, 'receipt'], [/air|pdam/i, 'droplet'],
+    [/pulsa|internet|wifi|kuota/i, 'wifi'], [/donasi|hadiah|persembahan|perpuluhan/i, 'gift'], [/tak terduga|darurat/i, 'alert-triangle'],
+    [/kesehatan|obat|dokter/i, 'first-aid-kit'], [/belanja|groceries/i, 'shopping-cart'], [/makan|kuliner|food/i, 'tools-kitchen-2'],
+    [/kopi|coffee/i, 'coffee'], [/transport|bensin|ojol|parkir/i, 'motorbike'], [/hiburan|olahraga|badmin/i, 'ball-tennis'],
+    [/pendidikan|kursus|sekolah|buku/i, 'school'], [/keluarga|orang tua|mamak|adik/i, 'users'], [/gereja|ibadah/i, 'building-church'],
+    [/pakaian|baju/i, 'shirt'], [/tabungan|investasi/i, 'pig-money'], [/gaji|bonus|freelance|proyek/i, 'cash'], [/transfer/i, 'credit-card'],
+    [/hewan|kucing|anjing/i, 'paw'], [/liburan|travel/i, 'plane']
+  ];
+  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948', '#0f8b8d', '#8c5a3c', '#5b6b7f', '#7a8b2a'];
+  function catIcon(name) {
+    if (data.icons && data.icons[name]) return data.icons[name];
+    const r = ICON_RULES.find(([re]) => re.test(name));
+    return r ? r[1] : 'tag';
+  }
+  // warna tetap per kategori: mengikuti urutan di tab master, bukan peringkat pengeluaran
+  function catOrder() {
+    const names = data.master.categories.map(c => c.name).filter(n => !/^gaji$/i.test(n) && !/tabungan/i.test(n));
+    allTx().filter(isExpense).forEach(t => { if (!names.includes(t.category)) names.push(t.category); });
+    return names;
+  }
+  const catColor = (name) => { const i = catOrder().indexOf(name); return PALETTE[(i < 0 ? 0 : i) % PALETTE.length]; };
+  function shade(hex, k) {   // campur warna kategori dengan putih untuk sub kategori
+    const n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(v + (255 - v) * (1 - k)));
+    return '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  const budgetState = (spent, b) => !b ? 'none' : spent > b ? 'over' : spent / b > 0.85 ? 'warn' : 'good';
+
+  function selectCat(c) { selectedCat = selectedCat === c ? null : c; render(); }
 
   function renderDashboard(p, list) {
     const tx = p ? allTx().filter(p.match) : [];
@@ -206,81 +242,182 @@
     const inc = sum(isIncome), exp = sum(isExpense), sav = sum(isSaving);
     $('#heroValue').textContent = rp(inc - exp - sav);
     $('#heroSub').textContent = inc ? `${Math.round((exp / inc) * 100)}% pemasukan terpakai, ${Math.round((sav / inc) * 100)}% ditabung` : '';
-    $('#sumIncome').textContent = rp(inc);
-    $('#sumExpense').textContent = rp(exp);
-    $('#sumSaving').textContent = rp(sav);
+    $('#sumIncome').textContent = rpShort(inc);
+    $('#sumExpense').textContent = rpShort(exp);
+    $('#sumSaving').textContent = rpShort(sav);
 
-    // per kategori
     const byCat = {};
     tx.filter(isExpense).forEach(t => byCat[t.category] = (byCat[t.category] || 0) + t.amount);
-    const rows = Object.entries(byCat).map(([label, value]) => ({ label, value, share: exp ? value / exp : 0 }))
-      .sort((a, b) => b.value - a.value);
-    renderHBar($('#catChart'), rows);
-    renderSubDetail(tx);
+    const budget = effective(data.budgetHist, snapKey(p)) || {};
+    renderCatGrid(byCat, budget, exp, tx);
 
-    // harian
+    // harian (ikut tersaring kategori terpilih)
+    const f = (t) => isExpense(t) && (!selectedCat || t.category === selectedCat);
+    $('#dailyTitle').textContent = selectedCat ? `Harian · ${selectedCat}` : 'Pengeluaran harian';
     if (p) {
       const days = [];
       for (let d = p.start; d <= p.end; d = addDays(d, 1)) days.push({ date: d, value: 0 });
-      tx.filter(isExpense).forEach(t => { const x = days.find(d => d.date === t.date); if (x) x.value += t.amount; });
+      tx.filter(f).forEach(t => { const x = days.find(d => d.date === t.date); if (x) x.value += t.amount; });
       renderColumns($('#dailyChart'), days.map((d, i) => ({
         value: d.value, tip: `${DAYS[fromIso(d.date).getDay()]}, ${fmtDay(d.date)}: ${rp(d.value)}`,
         tick: (i === 0 || i === days.length - 1 || (i % 7 === 0 && days.length - 1 - i >= 3)) ? fmtDay(d.date) : '',
         hl: d.date === todayStr()
-      })), 'Belum ada pengeluaran di periode ini.');
+      })), selectedCat ? `Belum ada pengeluaran ${selectedCat} di periode ini.` : 'Belum ada pengeluaran di periode ini.', false, selectedCat && catColor(selectedCat));
     } else $('#dailyChart').innerHTML = '<div class="empty">Belum ada data.</div>';
 
-    renderBudgetSummary(p, byCat);
+    renderBudgetMini(p, byCat, budget);
     if (p) renderMissions(p, list); else $('#missionList').innerHTML = '<div class="empty">Belum ada data.</div>';
 
-    // tren 6 periode
+    // tren 6 periode (ikut tersaring)
+    $('#trendTitle').textContent = selectedCat ? `${selectedCat} · 6 periode terakhir` : 'Pengeluaran 6 periode terakhir';
     const end = periodIdx < 0 ? list.length - 1 : periodIdx;
     const last = list.slice(Math.max(0, end - 5), end + 1);
     const all = allTx();
     renderColumns($('#trendChart'), last.map((q, i) => {
-      const v = all.filter(q.match).filter(isExpense).reduce((s, t) => s + t.amount, 0);
+      const v = all.filter(q.match).filter(f).reduce((s, t) => s + t.amount, 0);
       const lbl = mode === 'bulan' ? MON3[Number(q.key.slice(5, 7)) - 1] : fmtDay(q.start);
       return { value: v, tip: `${q.label}: ${rp(v)}`, tick: lbl, hl: i === last.length - 1 };
-    }), 'Belum ada data.', true);
+    }), 'Belum ada data.', true, selectedCat && catColor(selectedCat));
   }
 
-  function renderSubDetail(tx) {
-    const el = $('#subDetail');
-    if (!selectedCat) { el.innerHTML = ''; return; }
+  // ---------- grid ikon kategori + donat ----------
+  function renderCatGrid(byCat, budget, exp, tx) {
+    const el = $('#catGrid');
+    const names = [...new Set([...Object.keys(byCat), ...Object.keys(budget).filter(c => budget[c] > 0)])]
+      .filter(c => !/tabungan/i.test(c));
+    if (selectedCat && !names.includes(selectedCat)) names.push(selectedCat);
+    names.sort((a, b) => (byCat[b] || 0) - (byCat[a] || 0) || catOrder().indexOf(a) - catOrder().indexOf(b));
+    if (!names.length) { el.innerHTML = '<div class="empty">Belum ada pengeluaran di periode ini.</div>'; $('#catDetail').innerHTML = ''; return; }
+
+    const icons = names.map(c => {
+      const spent = byCat[c] || 0, b = budget[c] || 0, st = budgetState(spent, b);
+      const C = 2 * Math.PI * 21, p = b ? Math.min(1, spent / b) : 0;
+      return `<button class="cat${selectedCat && selectedCat !== c ? ' dim' : ''}${selectedCat === c ? ' on' : ''}" data-cat="${esc(c)}" aria-label="${esc(c)}">
+        <span class="cat-ic"><svg viewBox="0 0 50 50" class="ring" aria-hidden="true"><circle cx="25" cy="25" r="21" class="ring-track"/>
+          ${b ? `<circle cx="25" cy="25" r="21" class="ring-val ${st}" stroke-dasharray="${(p * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 25 25)"/>` : ''}
+          <circle cx="25" cy="25" r="15.5" fill="${catColor(c)}"/></svg>${ico(catIcon(c), 'cat-glyph')}</span>
+        <span class="cat-nm">${esc(c)}</span><span class="cat-am ${st}">${rpShort(spent)}</span></button>`;
+    });
+    el.innerHTML = `<div class="donut-cell">${donutSvg(byCat, names, tx)}</div>` + icons.join('');
+    $$('.cat', el).forEach(b => b.addEventListener('click', () => selectCat(b.dataset.cat)));
+    $('.donut-cell', el).addEventListener('click', () => { if (selectedCat) selectCat(selectedCat); });
+    renderCatDetail(byCat, budget, tx);
+  }
+
+  function arcPath(cx, cy, r, a0, a1) {
+    const p = (a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    const [x0, y0] = p(a0), [x1, y1] = p(a1);
+    return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+  }
+  function subTotals(tx, cat) {
     const by = {};
-    tx.filter(t => isExpense(t) && t.category === selectedCat).forEach(t => {
-      const k = t.sub || '(tanpa sub)'; by[k] = (by[k] || 0) + t.amount;
+    tx.filter(t => isExpense(t) && t.category === cat).forEach(t => { const k = t.sub || '(tanpa sub)'; by[k] = (by[k] || 0) + t.amount; });
+    return Object.entries(by).sort((a, b) => b[1] - a[1]);
+  }
+  function donutSvg(byCat, names, tx) {
+    let segs, label, total, sub;
+    if (selectedCat) {
+      const base = catColor(selectedCat);
+      segs = subTotals(tx, selectedCat).map(([n, v], i) => ({ v, c: shade(base, [1, 0.72, 0.5, 0.36, 0.26][i] || 0.2) }));
+      total = byCat[selectedCat] || 0; label = selectedCat;
+      const b = (effective(data.budgetHist, snapKey(currentPeriod())) || {})[selectedCat];
+      sub = b ? `dari ${rpShort(b)}` : 'tanpa budget';
+    } else {
+      segs = names.filter(n => byCat[n]).map(n => ({ v: byCat[n], c: catColor(n) }));
+      total = segs.reduce((s, x) => s + x.v, 0); label = 'Pengeluaran'; sub = 'ketuk ikon';
+    }
+    let a = -Math.PI / 2, out = '';
+    const gap = segs.length > 1 ? 0.03 : 0;
+    if (!total) out = `<circle cx="80" cy="80" r="62" class="ring-track" style="stroke-width:16"/>`;
+    segs.forEach(s => {
+      const a1 = a + (s.v / total) * 2 * Math.PI;
+      out += s.v / total > 0.9999 ? `<circle cx="80" cy="80" r="62" fill="none" stroke="${s.c}" stroke-width="16"/>`
+        : `<path d="${arcPath(80, 80, 62, a + gap / 2, Math.max(a + gap / 2 + 0.002, a1 - gap / 2))}" stroke="${s.c}" stroke-width="16" fill="none"/>`;
+      a = a1;
     });
-    const rows = Object.entries(by).sort((a, b) => b[1] - a[1]);
-    if (!rows.length) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="sub-detail"><h3>${esc(selectedCat)}</h3>${rows.map(([k, v]) =>
-      `<div class="sub-row"><span>${esc(k)}</span><span>${rp(v)}</span></div>`).join('')}</div>`;
+    return `<svg viewBox="0 0 160 160" class="donut" role="img" aria-label="Proporsi pengeluaran">${out}
+      <text x="80" y="66" text-anchor="middle" class="d-lbl">${esc(label.length > 16 ? label.slice(0, 15) + '…' : label)}</text>
+      <text x="80" y="89" text-anchor="middle" class="d-val">${rpShort(total)}</text>
+      <text x="80" y="106" text-anchor="middle" class="d-sub">${esc(sub)}</text></svg>`;
   }
 
-  // ---------- chart: bar horizontal ----------
-  function renderHBar(el, rows) {
-    if (!rows.length) { el.innerHTML = '<div class="empty">Belum ada pengeluaran di periode ini.</div>'; return; }
-    const W = 340, rowH = 30, labelW = 118, valW = 70, barMax = W - labelW - valW - 8;
-    const max = rows[0].value;
-    let svg = `<svg viewBox="0 0 ${W} ${rows.length * rowH}" role="img" aria-label="Pengeluaran per kategori">`;
-    rows.forEach((r, i) => {
-      const y = i * rowH, w = Math.max(4, (r.value / max) * barMax);
-      const label = r.label.length > 17 ? r.label.slice(0, 16) + '…' : r.label;
-      svg += `<text class="lbl" x="0" y="${y + 19}">${esc(label)}</text>`;
-      svg += `<rect class="hit" x="0" y="${y}" width="${W}" height="${rowH}" data-cat="${esc(r.label)}" data-tip="${esc(r.label)}: ${rp(r.value)} (${Math.round(r.share * 100)}%)"></rect>`;
-      svg += `<path class="bar${r.label === selectedCat ? ' on' : ''}" d="M${labelW},${y + 8} h${w - 4} a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h${-(w - 4)} z"></path>`;
-      svg += `<text class="val" x="${labelW + w + 6}" y="${y + 19}">${rpShort(r.value)}</text>`;
+  function renderCatDetail(byCat, budget, tx) {
+    const el = $('#catDetail');
+    if (!selectedCat) { el.innerHTML = '<div class="legend"><span><i class="dot good"></i>aman</span><span><i class="dot warn"></i>hampir habis</span><span><i class="dot over"></i>lewat budget</span><span class="muted-s">· cincin = budget</span></div>'; return; }
+    const c = selectedCat, spent = byCat[c] || 0, b = budget[c] || 0, st = budgetState(spent, b);
+    const subs = subTotals(tx, c);
+    const base = catColor(c);
+    el.innerHTML = `<div class="detail">
+      <div class="detail-head"><button class="chip" id="clearCat" style="background:${base}">${ico(catIcon(c))}${esc(c)}${ico('x')}</button>
+        <span class="detail-b ${st}">${b ? (spent > b ? `lewat ${rp(spent - b)}` : `sisa ${rp(b - spent)}`) : 'tanpa budget'}</span></div>
+      ${subs.length ? subs.map(([n, v], i) => `<div class="sub-row"><i class="sw" style="background:${shade(base, [1, 0.72, 0.5, 0.36, 0.26][i] || 0.2)}"></i><span class="sub-n">${esc(n)}</span><span class="sub-p">${Math.round(v / spent * 100)}%</span><span class="sub-v">${rp(v)}</span></div>`).join('')
+        : '<div class="empty">Belum ada transaksi di kategori ini.</div>'}
+      <div class="detail-actions"><button class="btn small" id="catHistory">${ico('list')} Riwayat ${esc(c)}</button><button class="btn small primary" id="catAdd">${ico('plus')} Catat ${esc(c)}</button></div>
+    </div>`;
+    $('#clearCat').addEventListener('click', () => selectCat(c));
+    $('#catHistory').addEventListener('click', () => showView('history'));
+    $('#catAdd').addEventListener('click', () => openSheet(null));
+  }
+
+  // ringkasan anggaran di Ringkasan (tabel lengkap ada di Rencana)
+  function renderBudgetMini(p, byCat, b) {
+    const el = $('#budgetMini');
+    const cats = Object.keys(b).filter(c => b[c] > 0);
+    if (!cats.length) { el.innerHTML = '<div class="empty">Belum ada anggaran. <button class="btn small" data-goto="budget">Atur anggaran</button></div>'; return; }
+    const tb = cats.reduce((s, c) => s + b[c], 0), ts = cats.reduce((s, c) => s + (byCat[c] || 0), 0);
+    const over = cats.filter(c => (byCat[c] || 0) > b[c]);
+    const st = budgetState(ts, tb);
+    let alloc = '';
+    if (mode === 'gaji' && p && data.alokasi?.aktif) {
+      const tx = allTx().filter(p.match);
+      if (!p.ongoing) { const a = tx.find(isAuto); alloc = a ? `✓ ${rp(a.amount)} sudah dialokasikan ke ${esc(data.alokasi.sub)}` : ''; }
+      else { const pr = projectAlokasi(tx, b); alloc = pr.amount > 0 ? `Perkiraan ke ${esc(data.alokasi.sub)}: <b>${rp(pr.amount)}</b>` : `Belum ada sisa untuk ${esc(data.alokasi.sub)}`; }
+    }
+    el.innerHTML = `<div class="bud-head"><span>${rpShort(ts)} dari ${rpShort(tb)}</span><span class="${st}">${ts > tb ? `lewat ${rp(ts - tb)}` : `sisa ${rp(tb - ts)}`}</span></div>
+      <div class="bud-track"><div class="bud-fill ${st === 'over' ? 'over' : st === 'warn' ? 'warn' : ''}" style="width:${Math.min(100, ts / tb * 100)}%"></div></div>
+      ${over.length ? `<div class="bud-status">✕ Lewat budget: ${over.map(c => `<button class="link" data-cat="${esc(c)}">${esc(c)}</button>`).join(', ')}</div>` : '<div class="bud-status">✓ Semua kategori masih dalam budget</div>'}
+      ${alloc ? `<div class="alloc">${alloc}</div>` : ''}
+      <button class="btn small" data-goto="budget" style="margin-top:10px">Lihat tabel anggaran ›</button>`;
+    $$('.link', el).forEach(b => b.addEventListener('click', () => { selectedCat = b.dataset.cat; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
+  }
+
+  // tabel anggaran lengkap (tab Rencana)
+  function renderBudgetTable() {
+    const el = $('#budgetTable');
+    const p = currentPeriod();
+    const tx = p ? allTx().filter(p.match) : [];
+    const byCat = {};
+    tx.filter(isExpense).forEach(t => byCat[t.category] = (byCat[t.category] || 0) + t.amount);
+    const b = effective(data.budgetHist, snapKey(p)) || {};
+    $('#budgetTableTitle').textContent = p ? `Anggaran · ${p.label}` : 'Anggaran';
+    const rows = [...new Set([...Object.keys(b).filter(c => b[c] > 0), ...Object.keys(byCat)])]
+      .map(c => ({ c, s: byCat[c] || 0, b: b[c] || 0 }))
+      .sort((x, y) => (y.b ? y.s / y.b : 9) - (x.b ? x.s / x.b : 9) || y.s - x.s);
+    if (!rows.length) { el.innerHTML = '<div class="empty">Belum ada anggaran maupun pengeluaran.</div>'; return; }
+    const tb = rows.reduce((s, r) => s + r.b, 0), ts = rows.filter(r => r.b).reduce((s, r) => s + r.s, 0);
+    const icon = { good: '✓', warn: '!', over: '✕', none: '' };
+    let html = `<table class="btable"><colgroup><col style="width:42%"><col style="width:19%"><col style="width:19%"><col style="width:20%"></colgroup>
+      <thead><tr><th>Category</th><th>Terpakai</th><th>Budget</th><th>Sisa</th></tr></thead><tbody>`;
+    rows.forEach(r => {
+      const st = budgetState(r.s, r.b);
+      html += `<tr data-cat="${esc(r.c)}"><td><span class="tcat">${ico(catIcon(r.c))}<span>${esc(r.c)}</span></span>
+        ${r.b ? `<div class="mini-track"><div class="mini-fill ${st}" style="width:${Math.min(100, r.s / r.b * 100)}%"></div></div>` : ''}</td>
+        <td>${rpShort(r.s)}</td><td class="muted-c">${r.b ? rpShort(r.b) : '–'}</td><td class="${st}">${r.b ? `${icon[st]} ${rpShort(r.b - r.s)}` : ''}</td></tr>`;
     });
-    el.innerHTML = svg + '</svg>';
-    bindTips(el);
-    $$('.hit', el).forEach(h => h.addEventListener('click', () => {
-      selectedCat = selectedCat === h.dataset.cat ? null : h.dataset.cat;
-      render();
-    }));
+    html += `</tbody><tfoot><tr><td>Total dianggarkan</td><td>${rpShort(ts)}</td><td>${rpShort(tb)}</td><td class="${ts > tb ? 'over' : ''}">${rpShort(tb - ts)}</td></tr></tfoot></table>`;
+    if (mode === 'gaji' && p && data.alokasi?.aktif && Object.keys(b).length) {
+      const pr = projectAlokasi(tx, b), sub = esc(data.alokasi.sub);
+      const auto = !p.ongoing && tx.find(isAuto);
+      html += `<div class="alloc">${auto ? `✓ ${rp(auto.amount)} sudah dialokasikan ke ${sub}.`
+        : pr.amount > 0 ? `Perkiraan <b>${rp(pr.amount)}</b> masuk ke ${sub} saat gaji berikutnya dicatat.`
+        : `Belum ada sisa untuk ${sub}${pr.sisa < 0 ? ` — total lewat ${rp(-pr.sisa)}` : ''}.`}</div>`;
+    }
+    el.innerHTML = html;
+    $$('tr[data-cat]', el).forEach(tr => tr.addEventListener('click', () => { selectedCat = tr.dataset.cat; showView('dashboard'); }));
   }
 
   // ---------- chart: kolom vertikal (harian & tren) ----------
-  function renderColumns(el, data, emptyMsg, valueLabels) {
+  function renderColumns(el, data, emptyMsg, valueLabels, color) {
     const max = Math.max(0, ...data.map(d => d.value));
     if (!max) { el.innerHTML = `<div class="empty">${emptyMsg}</div>`; return; }
     const W = 340, H = valueLabels ? 160 : 150, padL = valueLabels ? 4 : 34, padB = 20, padT = valueLabels ? 18 : 8;
@@ -304,7 +441,8 @@
       svg += `<rect class="hit" x="${padL + i * slot}" y="0" width="${slot}" height="${H}" data-tip="${esc(d.tip)}"></rect>`;
       if (d.value > 0) {
         const r = Math.min(valueLabels ? 4 : 2, bw / 2, h);
-        svg += `<path class="bar${valueLabels ? (d.hl ? ' cur' : ' soft') : ''}" d="M${x},${padT + plotH} v${-(h - r)} a${r},${r} 0 0 1 ${r},${-r} h${bw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} z"></path>`;
+        const fill = color ? ` style="fill:${valueLabels && !d.hl ? shade(color, 0.45) : color}"` : '';
+        svg += `<path${fill} class="bar${valueLabels ? (d.hl ? ' cur' : ' soft') : ''}" d="M${x},${padT + plotH} v${-(h - r)} a${r},${r} 0 0 1 ${r},${-r} h${bw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} z"></path>`;
         if (valueLabels) svg += `<text class="val" x="${cx}" y="${padT + plotH - h - 5}" text-anchor="middle">${rpShort(d.value)}</text>`;
       } else svg += '<g></g>';
       if (d.tick) {
@@ -372,53 +510,6 @@
     Object.keys(budget).forEach(c => { const s = budget[c] - (byCat[c] || 0); sisa += data.alokasi?.mode === 'positif' ? Math.max(0, s) : s; });
     const uang = sum(isIncome) - sum(isExpense) - sum(isSaving);
     return { sisa, uang, amount: Math.max(0, Math.min(sisa, uang)) };
-  }
-
-  function renderBudgetSummary(p, byCat) {
-    const el = $('#budgetSummary');
-    const b = effective(data.budgetHist, snapKey(p)) || {};
-    const cats = Object.keys(b).filter(c => b[c] > 0);
-    if (!cats.length) {
-      el.innerHTML = '<div class="empty">Belum ada anggaran untuk periode ini. <button class="btn small" data-goto="budget">Atur anggaran</button></div>';
-      return;
-    }
-    const elapsed = elapsedOf(p);
-    let tb = 0, ts = 0;
-    const rows = cats.map(c => { const s = byCat[c] || 0; tb += b[c]; ts += s; return { c, b: b[c], s, p: s / b[c] }; })
-      .sort((x, y) => y.p - x.p);
-    let html = rows.map(r => budgetRow(r.c, r.s, r.b, elapsed)).join('')
-      + `<div class="bud-row" style="border-top:1px solid var(--border);padding-top:10px">${budgetRow('Total dianggarkan', ts, tb, elapsed, true)}</div>`;
-
-    // info alokasi ke tabungan (hanya bermakna per periode gaji)
-    if (mode === 'gaji' && p && data.alokasi?.aktif) {
-      const tx = allTx().filter(p.match);
-      const sub = data.alokasi.sub || 'Tabungan Pribadi';
-      const firstKey = Object.keys(data.budgetHist || {}).sort()[0];
-      if (!p.ongoing) {
-        const auto = tx.find(isAuto);
-        html += auto
-          ? `<div class="alloc ok">✓ Sisa budget ${rp(auto.amount)} sudah dialokasikan ke ${esc(sub)}.</div>`
-          : (firstKey && p.key >= firstKey ? `<div class="alloc">Tidak ada sisa budget yang bisa dialokasikan di periode ini.</div>` : '');
-      } else {
-        const pr = projectAlokasi(tx, b);
-        const why = pr.amount < Math.max(0, pr.sisa) ? ` (dibatasi uang yang benar-benar tersisa, ${rp(Math.max(0, pr.uang))})` : '';
-        html += pr.amount > 0
-          ? `<div class="alloc">Perkiraan: <b>${rp(pr.amount)}</b> masuk ke ${esc(sub)} saat gaji berikutnya dicatat${why}.</div>`
-          : `<div class="alloc warn">Saat ini tidak ada sisa budget yang bisa ditabung${pr.sisa < 0 ? ` — total lewat ${rp(-pr.sisa)}` : ''}.</div>`;
-      }
-    }
-    el.innerHTML = html;
-  }
-  function budgetRow(name, spent, budget, elapsed, inner) {
-    const p = spent / budget;
-    let cls = '', status;
-    if (p > 1) { cls = 'over'; status = `✕ Lewat ${rp(spent - budget)}`; }
-    else if (p > Math.max(0.8, elapsed + 0.1)) { cls = 'warn'; status = `! Sisa ${rp(budget - spent)}, terpakai lebih cepat dari jadwal`; }
-    else status = `✓ Sisa ${rp(budget - spent)}`;
-    const html = `<div class="bud-head"><span>${esc(name)}</span><span>${rpShort(spent)} / ${rpShort(budget)}</span></div>
-      <div class="bud-track"><div class="bud-fill ${cls}" style="width:${Math.min(100, p * 100)}%"></div></div>
-      <div class="bud-status">${status}</div>`;
-    return inner ? html : `<div class="bud-row">${html}</div>`;
   }
 
   // ----- misi -----
@@ -589,6 +680,11 @@
     const ft = $('#filterType').value;
     let list = allTx();
     if (!q && p) list = list.filter(p.match);
+    if (selectedCat) list = list.filter(t => t.category === selectedCat);
+    $('#histChip').innerHTML = selectedCat
+      ? `<button class="chip" id="histClear" style="background:${catColor(selectedCat)}">${ico(catIcon(selectedCat))}${esc(selectedCat)}${ico('x')}</button><span class="muted-s">${list.length} transaksi · ${rp(list.reduce((s, t) => s + t.amount, 0))}</span>`
+      : '';
+    if (selectedCat) $('#histClear').addEventListener('click', () => selectCat(selectedCat));
     list = list.filter(t => !ft || kindOf(t) === ft)
       .filter(t => !q || [t.note, t.category, t.sub].join(' ').toLowerCase().includes(q))
       .sort((a, b) => b.date.localeCompare(a.date) || (b.row || 1e9) - (a.row || 1e9));
@@ -615,7 +711,9 @@
     const sign = k === 'in' ? '+' : '-';
     const cls = k === 'in' ? 'income' : k === 'save' ? 'saving' : 'expense';
     const sub = [t.sub, t.note && t.note !== '-' ? t.note : ''].filter(Boolean).join(' · ');
+    const dot = k === 'in' ? 'var(--income)' : k === 'save' ? 'var(--text-2)' : catColor(t.category);
     return `<button class="tx${t.pending ? ' pending' : ''}" ${t.pending ? `data-local="${t.localId}"` : `data-row="${t.row}"`}>
+      <span class="icon-dot tx-dot" style="background:${dot}">${ico(catIcon(t.category))}</span>
       <div class="tx-main"><div class="tx-title">${esc(t.category)}${t.pending ? '<span class="pill">belum terkirim</span>' : ''}${isAuto(t) ? '<span class="pill">otomatis</span>' : ''}</div>
       <div class="tx-sub">${esc(sub)}</div></div><div class="tx-amt ${cls}">${sign}${rp(t.amount)}</div></button>`;
   }
@@ -716,7 +814,8 @@
       $('#fDate').value = t.date;
       $('#fNote').value = t.note || '';
     } else {
-      setJenis(jenisList()[0]);
+      setJenis(jenisList()[0], selectedCat || undefined);
+      if (selectedCat) fillSubs();
       amt.value = '';
       $('#fDate').value = todayStr();
       $('#fNote').value = '';
@@ -980,6 +1079,7 @@
     $('#cfgInfo').textContent = data.loadedAt
       ? `Tersambung ke tab "${data.sheetName || '?'}" — ${data.tx.length} transaksi, ${data.master.categories.length} kategori.`
       : 'Belum pernah memuat data.';
+    renderIconList();
   }
   $('#saveCfg').addEventListener('click', async () => {
     const url = $('#cfgUrl').value.trim(), token = $('#cfgToken').value;
@@ -996,6 +1096,35 @@
     mode = b.dataset.v; store.set(K_MODE, mode); periodIdx = -1; selectedCat = null; render();
   }));
   $('#reloadData').addEventListener('click', () => reload());
+
+  // ----- ikon kategori -----
+  function renderIconList() {
+    const cats = [...catOrder(), ...data.master.categories.map(c => c.name).filter(n => /^gaji$|tabungan/i.test(n))];
+    $('#iconList').innerHTML = cats.map(c => `<button class="icon-row" data-cat="${esc(c)}">
+      <span class="icon-dot" style="background:${/^gaji$|tabungan/i.test(c) ? 'var(--text-2)' : catColor(c)}">${ico(catIcon(c))}</span><span>${esc(c)}</span>${ico('chevron-right', 'muted-ico')}</button>`).join('')
+      || '<div class="empty">Kategori belum termuat.</div>';
+    $$('#iconList .icon-row').forEach(b => b.addEventListener('click', () => openIconPicker(b.dataset.cat)));
+  }
+  function openIconPicker(cat) {
+    $('#iconTitle').textContent = `Ikon untuk ${cat}`;
+    const cur = catIcon(cat);
+    $('#iconGrid').innerHTML = ICON_CHOICES.map(n => `<button class="pick${n === cur ? ' on' : ''}" data-i="${n}" aria-label="${n}">${ico(n)}</button>`).join('');
+    $$('#iconGrid .pick').forEach(b => b.addEventListener('click', async () => {
+      const icons = { ...(data.icons || {}), [cat]: b.dataset.i };
+      $('#iconSheet').classList.add('hidden');
+      data.icons = icons; render(); renderIconList();
+      try { applyData(await api('setIcons', { icons })); toast('Ikon disimpan'); }
+      catch (e) { toast(e.offline ? 'Offline — ikon hanya berubah di HP ini sampai online' : e.message, 3500); store.set(K_DATA, data); }
+    }));
+    $('#iconSheet').classList.remove('hidden');
+  }
+  $('#closeIcon').addEventListener('click', () => $('#iconSheet').classList.add('hidden'));
+  $('#iconSheet').addEventListener('click', e => { if (e.target.id === 'iconSheet') $('#iconSheet').classList.add('hidden'); });
+
+  // sprite ikon disisipkan ke halaman supaya bisa dipakai dengan <use href="#i-…">
+  fetch('icons.svg').then(r => r.text()).then(t => {
+    const d = document.createElement('div'); d.style.display = 'none'; d.innerHTML = t; document.body.prepend(d);
+  }).catch(() => {});
 
   // ---------- PWA ----------
   if ('serviceWorker' in navigator) {

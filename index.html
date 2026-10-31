@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1c5cab">
+  <meta name="theme-color" content="#f6f3f0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16120f" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Pencatatan dan dashboard keuangan pribadi">
   <title>Keuanganku</title>
   <link rel="manifest" href="manifest.json">
@@ -38,24 +39,16 @@
         <div class="hero-label">Sisa uang periode ini</div>
         <div class="hero-value" id="heroValue">Rp0</div>
         <div class="hero-sub" id="heroSub"></div>
-      </div>
-
-      <div class="tiles">
-        <div class="tile"><span class="tile-label">Pemasukan</span><span class="tile-value" id="sumIncome">Rp0</span></div>
-        <div class="tile"><span class="tile-label">Pengeluaran</span><span class="tile-value" id="sumExpense">Rp0</span></div>
-        <div class="tile"><span class="tile-label">Ditabung</span><span class="tile-value" id="sumSaving">Rp0</span></div>
-      </div>
-
-      <div class="card">
-        <h2>Pengeluaran per kategori</h2>
-        <p class="muted">Tidak termasuk tabungan. Ketuk kategori untuk melihat rinciannya.</p>
-        <div id="catChart" class="chart"></div>
-        <div id="subDetail"></div>
+        <div class="hero-tiles">
+          <div><span>Masuk</span><b id="sumIncome">0</b></div>
+          <div><span>Keluar</span><b id="sumExpense">0</b></div>
+          <div><span>Ditabung</span><b id="sumSaving">0</b></div>
+        </div>
       </div>
 
       <div class="card">
-        <h2>Pengeluaran harian</h2>
-        <div id="dailyChart" class="chart"></div>
+        <div class="cat-grid" id="catGrid"></div>
+        <div id="catDetail"></div>
       </div>
 
       <div class="card">
@@ -65,17 +58,23 @@
 
       <div class="card">
         <h2>Anggaran</h2>
-        <div id="budgetSummary"></div>
+        <div id="budgetMini"></div>
       </div>
 
       <div class="card">
-        <h2>Pengeluaran 6 periode terakhir</h2>
+        <h2 id="dailyTitle">Pengeluaran harian</h2>
+        <div id="dailyChart" class="chart"></div>
+      </div>
+
+      <div class="card">
+        <h2 id="trendTitle">Pengeluaran 6 periode terakhir</h2>
         <div id="trendChart" class="chart"></div>
       </div>
     </section>
 
     <!-- RIWAYAT -->
     <section class="view hidden" id="view-history">
+      <div class="hist-chip" id="histChip"></div>
       <div class="filters">
         <input type="search" id="searchBox" placeholder="Cari transaksi…">
         <select id="filterType">
@@ -91,7 +90,11 @@
     <!-- ANGGARAN & MISI -->
     <section class="view hidden" id="view-budget">
       <div class="card">
-        <h2>Anggaran per Category</h2>
+        <h2 id="budgetTableTitle">Anggaran</h2>
+        <div id="budgetTable"></div>
+      </div>
+      <div class="card">
+        <h2>Atur anggaran per Category</h2>
         <div class="scope" id="budgetScope"></div>
         <p class="muted">Sisa budget bersih di akhir periode otomatis dicatat ke Tabungan Pribadi saat gaji berikutnya dicatat.</p>
         <div id="budgetForm"></div>
@@ -132,15 +135,21 @@
         <p class="muted">Kategori dan sub kategori diambil dari tab master di Google Sheet. Untuk menambah kategori, tambahkan di sheet lalu muat ulang.</p>
         <button class="btn full" id="reloadData">Muat ulang data dari sheet</button>
       </div>
+
+      <div class="card">
+        <h2>Ikon kategori</h2>
+        <p class="muted">Ketuk untuk mengganti ikon. Warna mengikuti urutan kategori di tab master.</p>
+        <div id="iconList"></div>
+      </div>
     </section>
   </main>
 
   <nav class="bottomnav">
-    <button class="nav-btn active" data-view="dashboard"><span>▦</span>Ringkasan</button>
-    <button class="nav-btn" data-view="history"><span>☰</span>Riwayat</button>
-    <button class="nav-add" id="openAdd" aria-label="Tambah transaksi">+</button>
-    <button class="nav-btn" data-view="budget"><span>◎</span>Rencana</button>
-    <button class="nav-btn" data-view="settings"><span>⚙</span>Lainnya</button>
+    <button class="nav-btn active" data-view="dashboard"><svg class="ico" aria-hidden="true"><use href="#i-chart-pie"></use></svg>Ringkasan</button>
+    <button class="nav-btn" data-view="history"><svg class="ico" aria-hidden="true"><use href="#i-list"></use></svg>Riwayat</button>
+    <button class="nav-add" id="openAdd" aria-label="Tambah transaksi"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+    <button class="nav-btn" data-view="budget"><svg class="ico" aria-hidden="true"><use href="#i-target"></use></svg>Rencana</button>
+    <button class="nav-btn" data-view="settings"><svg class="ico" aria-hidden="true"><use href="#i-settings"></use></svg>Lainnya</button>
   </nav>
 
   <!-- FORM TRANSAKSI -->
@@ -150,7 +159,7 @@
         <h2 id="sheetTitle">Tambah transaksi</h2>
         <button type="button" class="icon-btn" id="closeSheet" aria-label="Tutup">✕</button>
       </div>
-      <button type="button" class="btn full scan-btn" id="openScan">📷 Isi dari screenshot (AI)</button>
+      <button type="button" class="btn full scan-btn" id="openScan"><svg class="ico" aria-hidden="true"><use href="#i-camera"></use></svg> Isi dari screenshot (AI)</button>
       <div class="seg" id="jenisSeg"></div>
       <label>Jumlah Uang (Rp)
         <input type="text" inputmode="numeric" id="fAmount" placeholder="0" required>
@@ -172,7 +181,7 @@
       <datalist id="dlCategory"></datalist>
       <datalist id="dlSub"></datalist>
       <label>Keterangan
-        <input type="text" id="fNote" placeholder="mis. makan habis badmin" maxlength="200">
+        <input type="text" id="fNote" placeholder="mis. makan siang" maxlength="200">
       </label>
       <button type="submit" class="btn primary full" id="submitTx">Simpan</button>
       <button type="button" class="btn danger full hidden" id="deleteTx">Hapus transaksi</button>
@@ -202,6 +211,17 @@
         <button type="button" class="btn full" id="scanAgain">+ Scan gambar lain</button>
         <button type="button" class="btn primary full" id="scanSave">Simpan</button>
       </div>
+    </div>
+  </div>
+
+  <!-- PILIH IKON -->
+  <div class="sheet-backdrop hidden" id="iconSheet">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="iconTitle">Pilih ikon</h2>
+        <button type="button" class="icon-btn" id="closeIcon" aria-label="Tutup">✕</button>
+      </div>
+      <div class="icon-grid" id="iconGrid"></div>
     </div>
   </div>
 
