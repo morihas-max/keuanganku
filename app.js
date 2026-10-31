@@ -156,13 +156,39 @@
     render();
   }
 
+  // Kirim antrean ke sheet. Hanya item yang benar-benar terkirim yang dihapus dari antrean,
+  // jadi transaksi yang ditambahkan selama pengiriman tidak hilang.
+  let flushing = false, flushAgain = false;
   async function flushPending(inner) {
+    if (flushing) { flushAgain = true; return; }
     if (!pending.length) return;
-    const list = pending.map(({ localId, periode, ...t }) => t);
-    const json = await api('addMany', { list });
-    pending = []; store.set(K_PENDING, pending);
-    applyData(json);
-    if (!inner) { setSync(syncLabel()); toast(`${list.length} transaksi terkirim ke sheet`); render(); }
+    flushing = true; render();
+    const batch = pending.slice();
+    try {
+      // cid = kode unik per transaksi supaya Apps Script tidak mencatat dobel kalau dikirim ulang
+      const json = await api('addMany', { list: batch.map(({ localId, periode, ...t }) => ({ ...t, cid: localId })) });
+      const sent = new Set(batch.map(p => p.localId));
+      pending = pending.filter(p => !sent.has(p.localId)); store.set(K_PENDING, pending);
+      applyData(json);
+      setSync(syncLabel());
+      if (!inner) toast(batch.length > 1 ? `${batch.length} transaksi tersimpan ke sheet` : 'Tersimpan ke Google Sheet', 1800);
+    } finally {
+      flushing = false;
+      render();
+      if (flushAgain) { flushAgain = false; if (pending.length) flushPending(inner).catch(bgError); }
+    }
+  }
+  function bgError(err) {
+    if (err.setup) toast('Disimpan di HP. Sambungkan ke sheet agar terkirim.', 3500);
+    else if (err.offline) toast('Offline — tersimpan di HP, dikirim otomatis saat online', 3500);
+    else toast('Gagal mengirim ke sheet: ' + err.message, 5000);
+  }
+  // simpan ke antrean lalu kirim di belakang layar — form langsung tertutup
+  function queueAndSend(list) {
+    const now = Date.now();
+    list.forEach((t, i) => pending.push({ ...t, localId: 'p' + now.toString(36) + i + Math.random().toString(36).slice(2, 6) }));
+    store.set(K_PENDING, pending);
+    flushPending().catch(bgError);
   }
 
   // ---------- navigasi ----------
@@ -192,7 +218,7 @@
     $('#prevPeriod').disabled = !p || periodIdx <= 0;
     $('#nextPeriod').disabled = !p || periodIdx >= list.length - 1;
     $('#setupNotice').classList.toggle('hidden', !!cfg.url);
-    $('#pendingNotice').classList.toggle('hidden', !pending.length);
+    $('#pendingNotice').classList.toggle('hidden', !pending.length || flushing);
     $('#pendingText').textContent = `${pending.length} transaksi belum terkirim ke sheet.`;
     if (currentView === 'dashboard') renderDashboard(p, list);
     if (currentView === 'history') renderHistory(p);
@@ -714,7 +740,7 @@
     const dot = k === 'in' ? 'var(--income)' : k === 'save' ? 'var(--text-2)' : catColor(t.category);
     return `<button class="tx${t.pending ? ' pending' : ''}" ${t.pending ? `data-local="${t.localId}"` : `data-row="${t.row}"`}>
       <span class="icon-dot tx-dot" style="background:${dot}">${ico(catIcon(t.category))}</span>
-      <div class="tx-main"><div class="tx-title">${esc(t.category)}${t.pending ? '<span class="pill">belum terkirim</span>' : ''}${isAuto(t) ? '<span class="pill">otomatis</span>' : ''}</div>
+      <div class="tx-main"><div class="tx-title">${esc(t.category)}${t.pending ? `<span class="pill">${flushing ? 'menyimpan…' : 'belum terkirim'}</span>` : ''}${isAuto(t) ? '<span class="pill">otomatis</span>' : ''}</div>
       <div class="tx-sub">${esc(sub)}</div></div><div class="tx-amt ${cls}">${sign}${rp(t.amount)}</div></button>`;
   }
 
@@ -838,34 +864,29 @@
     if (isNewName() && $('#fSaveMaster').checked) tx.saveMaster = true;
 
     // edit transaksi yang belum terkirim: cukup ubah antrean lokal
+    if (editing && editing.pending && flushing) { toast('Sedang dikirim ke sheet, coba lagi sebentar'); return; }
     if (editing && editing.pending) {
       const i = pending.findIndex(p => p.localId === editing.localId);
       pending[i] = { ...pending[i], ...tx, periode: undefined };
       store.set(K_PENDING, pending); closeSheet(); render(); toast('Diperbarui (belum terkirim)');
       return;
     }
+    // transaksi baru: langsung tampil, dikirim ke sheet di belakang layar
+    if (!editing) {
+      closeSheet();
+      queueAndSend([tx]);
+      jumpToDate(tx.date);
+      return;
+    }
     busy = true; $('#submitTx').classList.add('loading'); $('#submitTx').textContent = 'Menyimpan…';
     try {
-      if (editing) {
-        applyData(await api('update', { row: editing.row, orig: origOf(editing), tx }));
-        toast('Transaksi diperbarui di sheet');
-      } else {
-        applyData(await api('add', { tx }));
-        toast('Tersimpan ke Google Sheet');
-      }
+      applyData(await api('update', { row: editing.row, orig: origOf(editing), tx }));
+      toast('Transaksi diperbarui di sheet');
       setSync(syncLabel());
       closeSheet();
       jumpToDate(tx.date);
     } catch (err) {
-      if (!editing && (err.offline || err.setup)) {
-        pending.push({ ...tx, localId: 'p' + Date.now() });
-        store.set(K_PENDING, pending);
-        toast(err.setup ? 'Disimpan di HP. Sambungkan ke sheet agar terkirim.' : 'Offline — disimpan di HP, dikirim saat online', 3500);
-        closeSheet();
-        jumpToDate(tx.date);
-      } else {
-        toast(err.message, 4500);
-      }
+      toast(err.message, 4500);
     }
     busy = false; $('#submitTx').classList.remove('loading'); $('#submitTx').textContent = 'Simpan';
   });
@@ -1041,20 +1062,8 @@
       return { jenis: t.jenis, amount: t.amount, date: t.date, category, sub, note: tidy(t.note), saveMaster: isNew || undefined };
     });
     if (list.some(t => !(t.amount > 0) || !t.date || !t.category)) { toast('Ada transaksi tanpa jumlah, tanggal, atau category'); return; }
-    const btn = $('#scanSave'); btn.classList.add('loading');
-    try {
-      applyData(await api('addMany', { list }));
-      setSync(syncLabel());
-      toast(`${list.length} transaksi tersimpan ke Google Sheet`);
-    } catch (err) {
-      if (err.offline) {
-        list.forEach((t, i) => pending.push({ ...t, localId: 'p' + Date.now() + i }));
-        store.set(K_PENDING, pending);
-        toast('Offline — disimpan di HP, dikirim saat online', 3500);
-      } else { btn.classList.remove('loading'); toast(err.message, 4500); return; }
-    }
-    btn.classList.remove('loading');
     scanItems = []; scanSheet.classList.add('hidden');
+    queueAndSend(list);
     jumpToDate(list[list.length - 1].date);
   });
 
