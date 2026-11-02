@@ -36,7 +36,10 @@
     <!-- RINGKASAN -->
     <section class="view" id="view-dashboard">
       <div class="card hero">
-        <div class="hero-label">Sisa uang periode ini</div>
+        <div class="hero-top">
+          <div class="hero-label">Sisa uang periode ini</div>
+          <button class="eye-btn" id="toggleAmt" aria-label="Tampilkan angka"><svg class="ico" aria-hidden="true"><use href="#i-eye-off"></use></svg></button>
+        </div>
         <div class="hero-value" id="heroValue">Rp0</div>
         <div class="hero-sub" id="heroSub"></div>
         <div class="hero-tiles">
@@ -134,6 +137,12 @@
         </div>
         <p class="muted">Kategori dan sub kategori diambil dari tab master di Google Sheet. Untuk menambah kategori, tambahkan di sheet lalu muat ulang.</p>
         <button class="btn full" id="reloadData">Muat ulang data dari sheet</button>
+      </div>
+
+      <div class="card">
+        <h2>Privasi</h2>
+        <label class="check"><input type="checkbox" id="cfgHide"> Sembunyikan angka utama setiap aplikasi dibuka</label>
+        <p class="muted" style="margin-top:6px">Berlaku untuk sisa uang, pemasukan, pengeluaran, dan tabungan di bagian atas Ringkasan. Angka di diagram kategori tetap terlihat. Angka juga disembunyikan lagi setiap kali aplikasi ditinggalkan.</p>
       </div>
 
       <div class="card">

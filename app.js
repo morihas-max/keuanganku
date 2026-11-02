@@ -55,6 +55,9 @@
   let editing = null;          // transaksi yang sedang diubah
   let formJenis = null;
   let busy = false;
+  const K_HIDE = 'kk_hide';
+  let hideAmt = store.get(K_HIDE, true);       // pengaturan: sembunyikan angka utama saat dibuka
+  let showAmt = !hideAmt;                       // status sesaat di layar
 
   // ---------- klasifikasi ----------
   const isIncome = (t) => /^pemasuk/i.test(t.jenis);
@@ -266,11 +269,15 @@
     const tx = p ? allTx().filter(p.match) : [];
     const sum = (f) => tx.filter(f).reduce((s, t) => s + t.amount, 0);
     const inc = sum(isIncome), exp = sum(isExpense), sav = sum(isSaving);
-    $('#heroValue').textContent = rp(inc - exp - sav);
-    $('#heroSub').textContent = inc ? `${Math.round((exp / inc) * 100)}% pemasukan terpakai, ${Math.round((sav / inc) * 100)}% ditabung` : '';
-    $('#sumIncome').textContent = rpShort(inc);
-    $('#sumExpense').textContent = rpShort(exp);
-    $('#sumSaving').textContent = rpShort(sav);
+    const mask = (v) => showAmt ? v : '••••';
+    $('#heroValue').textContent = showAmt ? rp(inc - exp - sav) : 'Rp ••••••';
+    $('#heroSub').textContent = !showAmt ? 'Ketuk ikon mata untuk melihat angka' : inc ? `${Math.round((exp / inc) * 100)}% pemasukan terpakai, ${Math.round((sav / inc) * 100)}% ditabung` : '';
+    $('#sumIncome').textContent = mask(rpShort(inc));
+    $('#sumExpense').textContent = mask(rpShort(exp));
+    $('#sumSaving').textContent = mask(rpShort(sav));
+    $('#toggleAmt use').setAttribute('href', showAmt ? '#i-eye' : '#i-eye-off');
+    $('#toggleAmt').setAttribute('aria-label', showAmt ? 'Sembunyikan angka' : 'Tampilkan angka');
+    $('.hero').classList.toggle('masked', !showAmt);
 
     const byCat = {};
     tx.filter(isExpense).forEach(t => byCat[t.category] = (byCat[t.category] || 0) + t.amount);
@@ -1085,6 +1092,7 @@
     $('#cfgUrl').value = cfg.url || '';
     $('#cfgToken').value = cfg.token || '';
     $$('#modeSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.v === mode));
+    $('#cfgHide').checked = hideAmt;
     $('#cfgInfo').textContent = data.loadedAt
       ? `Tersambung ke tab "${data.sheetName || '?'}" — ${data.tx.length} transaksi, ${data.master.categories.length} kategori.`
       : 'Belum pernah memuat data.';
@@ -1134,6 +1142,13 @@
   fetch('icons.svg').then(r => r.text()).then(t => {
     const d = document.createElement('div'); d.style.display = 'none'; d.innerHTML = t; document.body.prepend(d);
   }).catch(() => {});
+
+  // ---------- privasi angka ----------
+  $('#toggleAmt').addEventListener('click', () => { showAmt = !showAmt; render(); });
+  $('.hero').addEventListener('click', e => { if (!showAmt && !e.target.closest('#toggleAmt')) { showAmt = true; render(); } });
+  // sembunyikan lagi saat aplikasi ditinggalkan (pindah aplikasi / layar dikunci)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && hideAmt) { showAmt = false; render(); } });
+  $('#cfgHide').addEventListener('change', e => { hideAmt = e.target.checked; store.set(K_HIDE, hideAmt); showAmt = !hideAmt; });
 
   // ---------- PWA ----------
   if ('serviceWorker' in navigator) {

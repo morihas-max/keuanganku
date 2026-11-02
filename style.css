@@ -364,3 +364,9 @@ label.check input { width: auto; margin: 0; }
 .bud-head .good { color: var(--good-t); }
 .tx-dot { width: 34px; height: 34px; flex: none; }
 .tx-dot .ico { width: 17px; height: 17px; }
+
+.hero-top { display: flex; justify-content: space-between; align-items: center; }
+.eye-btn { border: 0; background: var(--surface); color: var(--text-2); width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; margin: -6px -4px -6px 0; }
+.eye-btn .ico { width: 20px; height: 20px; }
+.hero.masked .hero-value, .hero.masked .hero-tiles b { letter-spacing: 2px; color: var(--text-2); }
+.hero.masked { cursor: pointer; }
